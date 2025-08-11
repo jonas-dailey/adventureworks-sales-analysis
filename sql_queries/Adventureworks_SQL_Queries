@@ -1,0 +1,333 @@
+/* The company would like to know which of its products is the most popular among customers. 
+You figure that the average rating given in reviews is correlated with the number of sales 
+of a particular product (that products with higher reviews have more sales) */
+
+SELECT 
+	product.productid, 
+	product.name, 
+
+	AVG (productreview.rating) AS avgrating, 
+	
+	COUNT (productreview.rating) AS num_rating
+		
+FROM product
+
+INNER JOIN productreview 
+	
+	ON product.productid = productreview.productid
+	
+GROUP BY product.productid, product.name
+
+ORDER BY Avgrating DESC; -- Only 3 products with rankings. Need to look into sales data
+	
+/* The database includes transactions in different currencies and products from different cultures. 
+Since we don’t have sufficient detail within the reviews, 
+we turn our attention to extracting these insights from sales data */
+
+SELECT 
+	pmpdc.productmodelid, 
+	pd.description
+	
+FROM productmodelproductdescriptionculture AS pmpdc
+	
+INNER JOIN productdescription AS pd
+	
+	ON pmpdc.productdescriptionid = pd.productdescriptionid
+	
+WHERE pmpdc.cultureid = 'en'; -- 
+
+/* Find out the quantity sold by their productID */
+
+SELECT
+	productid,
+	
+		SUM (orderqty) AS quantity
+		
+FROM salesorderdetail
+	
+GROUP BY productid;
+
+/* Query the listing price by their productID 
+and their respective category and subcategory. */
+
+SELECT 
+	product.productID, 
+	productcategory.name AS category, 
+	productsubcategory.name AS subcategory, 
+	product.listprice
+	
+FROM product 
+	
+INNER JOIN productsubcategory
+	
+	ON productsubcategory.productsubcategoryid = product.productsubcategoryid
+	
+INNER JOIN productcategory
+	
+	ON productcategory.productcategoryid = productsubcategory.productcategoryid;
+
+/* Join both results together so we will know how many were sold by their category and subcategory */
+
+WITH product_sold AS (
+
+	SELECT
+		productid,
+	
+			SUM (orderqty) AS quantity
+		
+	FROM salesorderdetail
+	
+	GROUP BY productid
+),
+
+list_price AS (
+
+	SELECT 
+		product.productID, 
+		productcategory.name AS category, 
+		productsubcategory.name AS subcategory, 
+		product.listprice
+	
+	FROM product 
+	
+	JOIN productsubcategory
+	
+		ON productsubcategory.productsubcategoryid = product.productsubcategoryid
+	
+	JOIN productcategory
+	
+		ON productcategory.productcategoryid = productsubcategory.productcategoryid
+)
+	
+SELECT 
+	list_price.category,
+	list_price.subcategory,
+	
+		ROUND (AVG (list_price.listprice) AS avg,
+		
+		SUM (quantity), 2) AS sum
+
+FROM product_sold
+
+JOIN list_price
+	
+	ON product_sold.productid = list_price.productid
+	
+GROUP BY list_price.category, list_price.subcategory
+	
+ORDER BY sum DESC;
+
+/* Find our best salespeople using salesytd */
+
+SELECT
+	businessentityid,
+
+		ROUND(salesytd, 2) AS salesytd
+	
+FROM salesperson
+	
+ORDER BY salesytd DESC
+	
+LIMIT 5;
+
+/* Top 5 sales people for year 2014 */
+	
+SELECT	
+	salespersonid,
+	
+		ROUND( SUM (subtotal), 2) AS total_sales
+		
+FROM salesorderheader
+	
+WHERE 
+	orderdate >= '2014-01-01' AND orderdate <= '2014-12-31'
+	AND salespersonid IS NOT NULL AND salespersonid <> ""
+	
+GROUP BY salespersonid
+	
+ORDER BY total_sales DESC
+	
+LIMIT 5;
+
+/* Calculate the sales for each salesperson for the 
+year 2014 and display the results for the top 5 salespeople. */
+
+WITH orders AS (
+
+	SELECT	
+		salesorderid,
+	
+			SUM ( (unitprice - (unitpricediscount * unitprice) ) * orderqty) AS ordertotal
+		
+	FROM salesorderdetail
+
+	GROUP BY salesorderid
+),
+
+SalesPersonAndOrders AS (
+
+	SELECT	
+		salespersonid,
+		salesorderid
+			
+	FROM salesorderheader
+	
+	WHERE 
+		orderdate >= '2014-01-01' AND orderdate <= '2014-12-31'
+		AND salespersonid IS NOT NULL AND salespersonid <> ""
+		AND orderdate IS NOT NULL AND orderdate <> ""
+	
+	GROUP BY salespersonid, salesorderid
+)
+
+SELECT 
+	SalesPersonAndOrders.salespersonid,
+	
+		ROUND (SUM (orders.ordertotal), 2) AS ordertotalsum
+		
+FROM SalesPersonAndOrders
+
+JOIN orders
+	
+	ON orders.salesorderid = SalesPersonAndOrders.salesorderid
+	
+GROUP BY SalesPersonAndOrders.salespersonid
+	
+ORDER BY ordertotalsum DESC
+	
+LIMIT 5; -- Top 5 sales person ids
+
+/* See whether there is a positive relationship between the total 
+sales of the salespeople and their commission percentages. Exported
+as .csv file to calculate correlation with python. Please see sales_vs_commission_correlation
+python text and outputs */ 
+
+WITH SalesPersonTotalSales AS (
+
+	WITH orders AS (
+
+		SELECT	
+			salesorderid,
+	
+				SUM ( (unitprice - (unitpricediscount * unitprice) ) * orderqty) AS ordertotal
+		
+	FROM salesorderdetail
+
+	GROUP BY salesorderid
+	),
+
+	SalesPersonAndOrders AS (
+
+		SELECT	
+			salespersonid,
+			salesorderid,
+	
+				SUM (subtotal) AS total_sales
+		
+		FROM salesorderheader
+	
+		WHERE 
+			orderdate >= '2014-01-01' AND orderdate <= '2014-12-31'
+			AND salespersonid IS NOT NULL AND salespersonid <> ""
+			AND orderdate IS NOT NULL AND orderdate <> ""
+	
+		GROUP BY salespersonid, salesorderid
+	)
+
+	SELECT 
+		SalesPersonAndOrders.salespersonid,
+	
+			SUM (orders.ordertotal) AS ordertotalsum
+		
+	FROM SalesPersonAndOrders
+
+	JOIN orders
+	
+		ON orders.salesorderid = SalesPersonAndOrders.salesorderid
+	
+	GROUP BY SalesPersonAndOrders.salespersonid
+	
+	ORDER BY ordertotalsum DESC
+)
+	
+SELECT 
+	SalesPersonTotalSales.salespersonid,
+
+		ROUND (SalesPersonTotalSales.ordertotalsum, 2) AS totalsales, 
+			salesperson.commissionpct
+	
+FROM SalesPersonTotalSales
+	
+JOIN salesperson
+	
+	ON salesperson.businessentityid = SalesPersonTotalSales.salespersonid
+
+ORDER BY SalesPersonTotalSales.ordertotalsum DESC; 	-- Pearson correlation: 0.7375 (p-value: 0.000728)
+										  			-- Spearman correlation: 0.6328 (p-value: 0.006404)
+										  
+/* Verify that total sales figures are in USD. */
+
+WITH SalesPersonTotalSales AS (
+
+    WITH orders AS (
+
+        SELECT	
+            salesorderdetail.salesorderid,
+
+                SUM( (salesorderdetail.unitprice - (salesorderdetail.unitpricediscount * salesorderdetail.unitprice) ) * salesorderdetail.orderqty) AS ordertotal
+
+        FROM salesorderdetail
+
+        GROUP BY salesorderdetail.salesorderid
+    ),
+
+    SalesPersonAndOrders AS (
+
+        SELECT	
+            salesorderheader.salespersonid,
+            salesorderheader.salesorderid,
+
+            CASE 
+                WHEN currencyrate.fromcurrencycode = 'USD' OR currencyrate.averagerate IS NULL THEN 1.0
+                ELSE currencyrate.averagerate
+            END AS exch_rate
+
+        FROM salesorderheader
+
+        LEFT JOIN currencyrate 
+            ON salesorderheader.currencyrateid = currencyrate.currencyrateid
+
+        WHERE 
+            salesorderheader.orderdate >= '2014-01-01' 
+            AND salesorderheader.orderdate <= '2014-12-31'
+            AND salesorderheader.salespersonid IS NOT NULL 
+            AND salesorderheader.salespersonid <> ""
+    )
+
+    SELECT 
+        SalesPersonAndOrders.salespersonid,
+
+            SUM(orders.ordertotal * SalesPersonAndOrders.exch_rate) AS ordertotalsum_usd
+
+    FROM SalesPersonAndOrders
+
+    JOIN orders 
+
+        ON orders.salesorderid = SalesPersonAndOrders.salesorderid
+
+    GROUP BY SalesPersonAndOrders.salespersonid
+)
+
+SELECT 
+    SalesPersonTotalSales.salespersonid,
+
+        ROUND(SalesPersonTotalSales.ordertotalsum_usd, 2) AS totalsales,
+            salesperson.commissionpct
+
+FROM SalesPersonTotalSales
+
+JOIN salesperson 
+
+    ON salesperson.businessentityid = SalesPersonTotalSales.salespersonid
+
+ORDER BY SalesPersonTotalSales.ordertotalsum_usd DESC; --Verified sales were already reported in USD. No change to totals
